@@ -5,80 +5,93 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Galaxy Hunter</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: #050510;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    font-family: 'Courier New', monospace;
-    overflow: hidden;
-    touch-action: none;
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%;
+    background:#050510;
+    overflow:hidden;
+    touch-action:none;
+    font-family:'Courier New', monospace;
   }
   #wrap {
-    position: relative;
-    display: inline-block;
-    line-height: 0;
+    position:relative;
+    width:100vw;
+    height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
   }
   #gameCanvas {
-    display: block;
-    border: 1px solid #223;
-    width: 100vw;
-    height: auto;
-    max-height: 100vh;
-    object-fit: contain;
+    display:block;
+    border:1px solid #223;
+    touch-action:none;
+    max-width:100vw;
+    max-height:100vh;
   }
-  /* Action buttons — always visible on touch devices */
-  #action-btns {
-    position: absolute;
-    bottom: 10px;
-    right: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    pointer-events: none;
+  /* Floating action buttons — top right, only shown on touch devices */
+  #float-btns {
+    position:absolute;
+    top:10px;
+    right:10px;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    pointer-events:none;
   }
-  #action-btns button {
-    pointer-events: all;
-    background: rgba(255,215,0,0.18);
-    border: 1px solid rgba(255,215,0,0.5);
-    border-radius: 10px;
-    color: #ffd700;
-    padding: 10px 16px;
-    font-size: 13px;
-    font-family: 'Courier New', monospace;
-    cursor: pointer;
-    touch-action: none;
-    user-select: none;
-    backdrop-filter: blur(4px);
+  .fbtn {
+    pointer-events:all;
+    background:rgba(10,10,30,0.75);
+    border:1px solid rgba(255,255,255,0.25);
+    border-radius:10px;
+    color:#ddd;
+    font-family:'Courier New',monospace;
+    font-size:14px;
+    padding:9px 14px;
+    cursor:pointer;
+    touch-action:none;
+    user-select:none;
+    backdrop-filter:blur(6px);
+    white-space:nowrap;
   }
-  #action-btns button:active { background: rgba(255,215,0,0.4); }
-  @media (hover: hover) {
-    /* Desktop: hide action buttons since keyboard works */
-    #action-btns { display: none; }
+  .fbtn.gold  { border-color:rgba(255,215,0,0.5); color:#ffd700; }
+  .fbtn.cyan  { border-color:rgba(0,200,255,0.5); color:#00c8ff; }
+  .fbtn.red   { border-color:rgba(220,50,50,0.5); color:#ff5050; }
+  .fbtn:active { opacity:0.6; }
+  /* Only show float-btns on touch screens */
+  @media (hover:hover) and (pointer:fine) {
+    #float-btns { display:none; }
   }
 </style>
 </head>
 <body>
 <div id="wrap">
-  <canvas id="gameCanvas" width="1200" height="600"></canvas>
-  <div id="action-btns">
-    <button id="btn-enter">✓ OK</button>
-    <button id="btn-r">R Menu</button>
-    <button id="btn-esc">ESC</button>
-    <button id="btn-tab">⚙ Settings</button>
-    <button id="btn-shop">🛒 Tienda</button>
-    <button id="btn-lb">🏆 Ranking</button>
+  <canvas id="gameCanvas"></canvas>
+  <!-- Floating buttons for touch screens -->
+  <div id="float-btns">
+    <button class="fbtn gold" id="btn-shop">🛒 Tienda</button>
+    <button class="fbtn cyan" id="btn-lb">🏆 Ranking</button>
+    <button class="fbtn"      id="btn-tab">⚙ Settings</button>
+    <button class="fbtn red"  id="btn-esc">✕ ESC</button>
   </div>
 </div>
 <script>
 // ─────────────────────────────────────────────────────────────────
-// CANVAS SETUP
+// CANVAS SETUP — fills screen maintaining aspect ratio
 // ─────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const W = 1200, H = 600;
+
+function resizeCanvas() {
+  const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width  = Math.floor(W * s) + 'px';
+  canvas.style.height = Math.floor(H * s) + 'px';
+  canvas.width  = W;
+  canvas.height = H;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
 
 // ─────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -238,14 +251,78 @@ function randRange(rng, a, b) { return Math.floor(rng()*(b-a+1))+a; }
 // WALL LOGIC
 // ─────────────────────────────────────────────────────────────────
 function crearMuros(mundo) {
-  const rng = seededRng(mundo*9999+7);
+  // Use a seed that changes every play (Date.now + mundo) so worlds look different each run
+  const seed = (Math.floor(Date.now()/1000) * 1000 + mundo * 137) >>> 0;
+  const rng  = seededRng(seed);
+
+  // Wall count scales with world, capped
+  const n = Math.min(5 + Math.floor(mundo * 0.7), 11);
+
+  // Target total area stays constant regardless of mundo
+  const TARGET_AREA = 38000;
+
+  // Aspect ratio constraints: width/height must be between 1/4 and 4/1
+  const MIN_RATIO = 0.25, MAX_RATIO = 4.0;
+  // Absolute size bounds
+  const MIN_W = 30, MAX_W = 180, MIN_H = 30, MAX_H = 130;
+
+  // Margin between walls and from edges
+  const MARGIN = 14;
+  const EDGE   = 20;   // keep walls away from canvas edge
+
   const ms = [];
-  const n = Math.min(5+mundo, 12);
-  for(let i=0;i<n;i++) {
-    const w=randRange(rng,50,150), h=randRange(rng,20,90);
-    const x=randRange(rng,0,W-w), y=randRange(rng,0,H-h);
-    ms.push({x,y,w,h});
+  let remainArea = TARGET_AREA;
+  let attempts   = 0;
+  const MAX_AT   = 2000;
+
+  while(ms.length < n && remainArea > 800 && attempts < MAX_AT) {
+    attempts++;
+
+    // Distribute remaining area roughly evenly among remaining walls
+    const left = n - ms.length;
+    const share = remainArea / left;
+
+    // Pick a random area for this wall: 50%–150% of fair share, clamped
+    const targetA = share * (0.5 + rng() * 1.0);
+
+    // Pick width first, derive height from area, then clamp both
+    let w = MIN_W + rng() * (MAX_W - MIN_W);
+    let h = targetA / w;
+
+    // Enforce height bounds
+    if(h < MIN_H) { h = MIN_H; w = targetA / h; }
+    if(h > MAX_H) { h = MAX_H; w = targetA / h; }
+
+    // Enforce width bounds after height adjustment
+    if(w < MIN_W) w = MIN_W;
+    if(w > MAX_W) w = MAX_W;
+
+    // Enforce aspect ratio
+    if(w/h > MAX_RATIO) w = h * MAX_RATIO;
+    if(w/h < MIN_RATIO) w = h * MIN_RATIO;
+
+    // Round to integers
+    w = Math.max(MIN_W, Math.min(MAX_W, Math.round(w)));
+    h = Math.max(MIN_H, Math.min(MAX_H, Math.round(h)));
+
+    // Pick random position, keeping away from edges
+    const x = Math.round(EDGE + rng() * (W - w - EDGE*2));
+    const y = Math.round(EDGE + rng() * (H - h - EDGE*2));
+
+    // Check it doesn't overlap any existing wall (with margin)
+    const rect = {x, y, w, h};
+    const overlaps = ms.some(m =>
+      x - MARGIN < m.x + m.w &&
+      x + w + MARGIN > m.x   &&
+      y - MARGIN < m.y + m.h &&
+      y + h + MARGIN > m.y
+    );
+    if(overlaps) continue;
+
+    ms.push(rect);
+    remainArea -= w * h;
   }
+
   return ms;
 }
 function posValida(x,y,s,muros,margen=10) {
@@ -1503,8 +1580,8 @@ function drawMenu(opcion, tick, hs) {
 
   // instructions
   ctx.fillStyle='rgba(120,120,150,0.8)'; ctx.font='13px monospace'; ctx.textAlign='center';
-  ctx.fillText(T('navegar'),W/2,H-34);
-  ctx.fillText(T('jugar'),W/2,H-14);
+  ctx.fillText(T('navegar') + '  |  Toca una opcion',W/2,H-34);
+  ctx.fillText(T('jugar') + '  |  Tap to play',W/2,H-14);
   // decorative coins
   drawMoneda(W/2-13-480,68,tick); drawMoneda(W/2-13+480,68,tick+300);
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
@@ -1693,140 +1770,132 @@ document.addEventListener('keyup', e => { keys[e.code] = false; });
 // ─────────────────────────────────────────────────────────────────
 // JOYSTICK (drawn on canvas, touch-driven)
 // ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// JOYSTICK (HTML element — always visible in ctrl-bar)
+// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// JOYSTICK — drawn on canvas, bottom-left, only during gameplay
+// ─────────────────────────────────────────────────────────────────
 const JOY = {
-  active: false,
-  baseX: 0, baseY: 0,   // center of joystick base (canvas coords)
-  stickX: 0, stickY: 0, // current stick position
-  dx: 0, dy: 0,         // normalized -1..1
-  radius: 55,
-  touchId: null,
-  startX: 0, startY: 0  // where touch started
+  dx:0, dy:0, active:false, touchId:null,
+  bx:90, by:H-90, radius:65, knobR:28, kx:90, ky:H-90
 };
 
-function canvasCoords(e, touch) {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width  / rect.width;
-  const scaleY = canvas.height / rect.height;
-  return [(touch.clientX - rect.left)*scaleX, (touch.clientY - rect.top)*scaleY];
+function toCanvas(touch) {
+  const r=canvas.getBoundingClientRect();
+  return [(touch.clientX-r.left)*(W/r.width),(touch.clientY-r.top)*(H/r.height)];
+}
+function isPlaying() {
+  return !enMenu&&!enNombreScreen&&!enLeaderboard&&!enShop&&!enSettings&&!gameOver&&!mundoGanado;
+}
+function joyUpdate(cx,cy) {
+  const ddx=cx-JOY.bx,ddy=cy-JOY.by,len=Math.hypot(ddx,ddy)||1;
+  const cl=Math.min(len,JOY.radius-JOY.knobR);
+  JOY.dx=ddx/len; JOY.dy=ddy/len;
+  JOY.kx=JOY.bx+JOY.dx*cl; JOY.ky=JOY.by+JOY.dy*cl;
 }
 
-// Only activate joystick for touches in the left half of the canvas
-const JOY_ZONE_X = 0.45; // left 45% of canvas width
-
-canvas.addEventListener('touchstart', e => {
+canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
-  for(const t of e.changedTouches) {
-    const [cx, cy] = canvasCoords(e, t);
-    if(cx < W * JOY_ZONE_X) {
-      // joystick
-      if(!JOY.active) {
-        JOY.active  = true;
-        JOY.touchId = t.identifier;
-        JOY.baseX   = cx; JOY.baseY = cy;
-        JOY.stickX  = cx; JOY.stickY = cy;
-        JOY.startX  = cx; JOY.startY = cy;
-        JOY.dx=0; JOY.dy=0;
-      }
+  for(const t of e.changedTouches){
+    const [cx,cy]=toCanvas(t);
+    if(isPlaying()&&!JOY.active&&Math.hypot(cx-JOY.bx,cy-JOY.by)<JOY.radius+20){
+      JOY.active=true; JOY.touchId=t.identifier; JOY.kx=JOY.bx; JOY.ky=JOY.by;
+      joyUpdate(cx,cy);
     }
   }
-}, {passive:false});
-
-canvas.addEventListener('touchmove', e => {
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
   e.preventDefault();
-  for(const t of e.changedTouches) {
-    if(t.identifier === JOY.touchId) {
-      const [cx, cy] = canvasCoords(e, t);
-      const ddx = cx - JOY.baseX, ddy = cy - JOY.baseY;
-      const len = Math.hypot(ddx, ddy) || 1;
-      const clamped = Math.min(len, JOY.radius);
-      JOY.dx = ddx/len; JOY.dy = ddy/len;
-      JOY.stickX = JOY.baseX + JOY.dx * clamped;
-      JOY.stickY = JOY.baseY + JOY.dy * clamped;
-    }
-  }
-}, {passive:false});
-
-canvas.addEventListener('touchend', e => {
+  for(const t of e.changedTouches) if(t.identifier===JOY.touchId){const[cx,cy]=toCanvas(t);joyUpdate(cx,cy);}
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
   e.preventDefault();
-  for(const t of e.changedTouches) {
-    if(t.identifier === JOY.touchId) {
-      JOY.active=false; JOY.touchId=null; JOY.dx=0; JOY.dy=0;
-    }
+  for(const t of e.changedTouches){
+    if(t.identifier===JOY.touchId){JOY.active=false;JOY.touchId=null;JOY.dx=0;JOY.dy=0;}
+    else handleCanvasTap(t.clientX,t.clientY);
   }
-}, {passive:false});
+},{passive:false});
+canvas.addEventListener('touchcancel',e=>{e.preventDefault();JOY.active=false;JOY.touchId=null;JOY.dx=0;JOY.dy=0;},{passive:false});
 
-canvas.addEventListener('touchcancel', e => {
-  JOY.active=false; JOY.touchId=null; JOY.dx=0; JOY.dy=0;
-}, {passive:false});
-
-function drawJoystick(tick) {
-  if(!JOY.active) return;
-  // base ring
-  ctx.beginPath(); ctx.arc(JOY.baseX, JOY.baseY, JOY.radius, 0, Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.08)'; ctx.fill();
-  ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=2; ctx.stroke();
-  // inner guide circles
-  ctx.beginPath(); ctx.arc(JOY.baseX, JOY.baseY, JOY.radius*0.45, 0, Math.PI*2);
-  ctx.strokeStyle='rgba(255,255,255,0.1)'; ctx.lineWidth=1; ctx.stroke();
-  // stick
-  ctx.beginPath(); ctx.arc(JOY.stickX, JOY.stickY, 26, 0, Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.22)'; ctx.fill();
-  ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=2; ctx.stroke();
-  // direction dot
-  ctx.beginPath(); ctx.arc(JOY.stickX, JOY.stickY, 8, 0, Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fill();
+function drawJoystick() {
+  if(!isPlaying()) return;
+  const {bx,by,radius,knobR}=JOY;
+  const kx=JOY.active?JOY.kx:bx, ky=JOY.active?JOY.ky:by;
+  const al=JOY.active?0.7:0.28;
+  ctx.beginPath();ctx.arc(bx,by,radius,0,Math.PI*2);
+  ctx.fillStyle=`rgba(255,255,255,${al*0.13})`;ctx.fill();
+  ctx.strokeStyle=`rgba(255,255,255,${al*0.5})`;ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(bx,by,radius*0.45,0,Math.PI*2);
+  ctx.strokeStyle=`rgba(255,255,255,${al*0.2})`;ctx.lineWidth=1;ctx.stroke();
+  ctx.strokeStyle=`rgba(255,255,255,${al*0.18})`;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(bx-radius+8,by);ctx.lineTo(bx+radius-8,by);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(bx,by-radius+8);ctx.lineTo(bx,by+radius-8);ctx.stroke();
+  ctx.beginPath();ctx.arc(kx,ky,knobR,0,Math.PI*2);
+  ctx.fillStyle=`rgba(255,255,255,${al*0.3})`;ctx.fill();
+  ctx.strokeStyle=`rgba(255,255,255,${al*0.9})`;ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(kx,ky,7,0,Math.PI*2);
+  ctx.fillStyle=`rgba(255,255,255,${al})`;ctx.fill();
 }
 
-// Mobile action buttons
-function mapBtn(id, code, key) {
-  const el = document.getElementById(id);
-  if(!el) return;
-  const press   = () => { keys[code]=true;  handleKey(code, key); };
-  const release = () => { keys[code]=false; };
-  el.addEventListener('touchstart', e=>{ e.preventDefault(); press();   }, {passive:false});
-  el.addEventListener('touchend',   e=>{ e.preventDefault(); release(); }, {passive:false});
-  el.addEventListener('mousedown',  press);
-  el.addEventListener('mouseup',    release);
+// ── Floating button wiring ──
+function wireBtn(id,code,key){
+  const el=document.getElementById(id);if(!el)return;
+  const press=()=>{keys[code]=true;handleKey(code,key);};
+  const release=()=>{keys[code]=false;};
+  el.addEventListener('touchstart',e=>{e.preventDefault();press();},{passive:false});
+  el.addEventListener('touchend',  e=>{e.preventDefault();release();},{passive:false});
+  el.addEventListener('mousedown', press);
+  el.addEventListener('mouseup',   release);
 }
-mapBtn('btn-enter','Enter','Enter');
-mapBtn('btn-r',    'KeyR', 'r');
-mapBtn('btn-esc',  'Escape','Escape');
-mapBtn('btn-tab',  'Tab',  'Tab');
-mapBtn('btn-shop', 'KeyQ', 'q');
-mapBtn('btn-lb',   'KeyL', 'l');
+wireBtn('btn-shop','KeyQ','q');
+wireBtn('btn-lb',  'KeyL','l');
+wireBtn('btn-tab', 'Tab','Tab');
+wireBtn('btn-esc', 'Escape','Escape');
 
-// Also wire canvas tap on right half for ENTER (menu confirm)
-canvas.addEventListener('click', e => {
+// ── Canvas tap handler ──
+function handleCanvasTap(clientX,clientY){
   const rect=canvas.getBoundingClientRect();
-  const cx=(e.clientX-rect.left)*(canvas.width/rect.width);
-  if(cx > W*0.5 && (enMenu||enNombreScreen)) handleKey('Enter','Enter');
-});
-
-// Leaderboard tab clicks
-canvas.addEventListener('click', e => {
-  if(!enLeaderboard) return;
-  const rect=canvas.getBoundingClientRect();
-  const cx=(e.clientX-rect.left)*(canvas.width/rect.width);
-  const cy=(e.clientY-rect.top)*(canvas.height/rect.height);
-  const tabY=76, tabH=24;
-  const tabs=[
-    {label:'TODOS',   val:null},
-    {label:'FACIL',   val:'facil'},
-    {label:'NORMAL',  val:'normal'},
-    {label:'DIFICIL', val:'dificil'},
-  ];
-  ctx.font='13px monospace';
-  let tabX=W/2-200;
-  for(const tab of tabs) {
-    const tw=ctx.measureText(tab.label).width+18;
-    if(cx>=tabX&&cx<=tabX+tw&&cy>=76&&cy<=100) {
-      leaderboardDif=tab.val;
-      fetchLeaderboard(tab.val);
-      break;
+  const cx=(clientX-rect.left)*(W/rect.width);
+  const cy=(clientY-rect.top)*(H/rect.height);
+  if(enLeaderboard){
+    const tabs=[{val:null},{val:'facil'},{val:'normal'},{val:'dificil'}];
+    const labels=['TODOS','FACIL','NORMAL','DIFICIL'];
+    ctx.font='13px monospace';let tabX=W/2-200;
+    for(let i=0;i<tabs.length;i++){
+      const tw=ctx.measureText(labels[i]).width+18;
+      if(cx>=tabX&&cx<=tabX+tw&&cy>=76&&cy<=100){leaderboardDif=tabs[i].val;fetchLeaderboard(tabs[i].val);return;}
+      tabX+=tw+8;
     }
-    tabX+=tw+8;
+    return;
   }
-});
+  if(enNombreScreen){handleKey('Enter','Enter');return;}
+  if(enMenu){
+    const optY=[248,248+88,248+176],optH=74,bx2=W/2-300,bw=600;
+    for(let i=0;i<3;i++) if(cx>=bx2&&cx<=bx2+bw&&cy>=optY[i]&&cy<=optY[i]+optH){opcionMenu=i;handleKey('Enter','Enter');return;}
+    if(cy>=H-62&&cy<=H-36){handleKey('KeyL','l');return;}
+    return;
+  }
+  if(enShop){
+    const COLS=2,itemW=560,itemH=72,gap=10,gridY=100,gridX=W/2-itemW-gap/2;
+    for(let vi=0;vi<10;vi++){
+      const idx=shopScroll*COLS+vi;if(idx>=TIENDA_ITEMS.length)break;
+      const ix=gridX+(vi%COLS)*(itemW+gap),iy=gridY+Math.floor(vi/COLS)*(itemH+gap);
+      if(cx>=ix&&cx<=ix+itemW&&cy>=iy&&cy<=iy+itemH){shopSel=idx;applyPurchase(TIENDA_ITEMS[idx]);return;}
+    }
+    return;
+  }
+  if(enSettings){
+    const VISIBLE=7,itemH=54,listW=500,listX=W/2-listW/2,listY=112;
+    for(let vi=0;vi<VISIBLE;vi++){
+      const idx=scrollIdioma+vi;if(idx>=IDIOMAS.length)break;
+      if(cx>=listX&&cx<=listX+listW&&cy>=listY+vi*itemH&&cy<=listY+vi*itemH+itemH-6){opcionIdioma=idx;idioma=IDIOMAS[idx][0];return;}
+    }
+    return;
+  }
+  if(gameOver){handleKey('KeyR','r');return;}
+}
+canvas.addEventListener('click',e=>handleCanvasTap(e.clientX,e.clientY));
 
 let resetHoldTimer = 0;
 
@@ -2571,7 +2640,8 @@ function draw(tick) {
   }
 
   drawJugador(jug,tick);
-  drawJoystick(tick);
+  drawJoystick();
+
 
   // HUD — coin progress bar
   const bw=300, bh=18, bx=W/2-bw/2, byh=10;
