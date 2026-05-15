@@ -1,0 +1,2 @@
+# GalaxyHunter
+Catch the coin
