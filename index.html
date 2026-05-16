@@ -445,6 +445,16 @@ function crearMuros(mundo) {
 
   return ms;
 }
+// Wall sliding helper for enemies
+function enemySlide(e, nx2, ny2) {
+  const t=e.tam;
+  const cols=(x,y)=>muros.some(m=>x<m.x+m.w&&x+t>m.x&&y<m.y+m.h&&y+t>m.y);
+  const cx=Math.max(0,Math.min(W-t,nx2)), cy=Math.max(0,Math.min(H-t,ny2));
+  if(!cols(cx,cy))       { e.x=cx; e.y=cy; }
+  else if(!cols(cx,e.y)) { e.x=cx; }
+  else if(!cols(e.x,cy)) { e.y=cy; }
+}
+
 function posValida(x,y,s,muros,margen=10) {
   if(x<0||y<0||x+s>W||y+s>H) return false;
   for(const m of muros) if(x-margen<m.x+m.w&&x+s+margen>m.x&&y-margen<m.y+m.h&&y+s+margen>m.y) return false;
@@ -1897,7 +1907,7 @@ document.addEventListener('keyup', e => { keys[e.code] = false; });
 // ─────────────────────────────────────────────────────────────────
 const JOY = {
   dx:0, dy:0, active:false, touchId:null,
-  bx:90, by:H-90, radius:65, knobR:28, kx:90, ky:H-90
+  bx:95, by:H-95, radius:85, knobR:36, kx:95, ky:H-95
 };
 
 function toCanvas(touch) {
@@ -2267,17 +2277,23 @@ function update(dt, tick) {
   if(keys['ArrowRight']||keys['KeyD']) dxi+=1;
   if(keys['ArrowUp']||keys['KeyW']) dyi-=1;
   if(keys['ArrowDown']||keys['KeyS']) dyi+=1;
-  // joystick override (only if no keyboard)
+  // Joystick: analog input with dead zone 0.2, max speed at 0.7 of travel
   if(JOY.active && dxi===0 && dyi===0) {
-    if(Math.abs(JOY.dx)>0.15) dxi=JOY.dx;
-    if(Math.abs(JOY.dy)>0.15) dyi=JOY.dy;
+    const dead=0.2, full=0.85;
+    const ax=Math.abs(JOY.dx), ay=Math.abs(JOY.dy);
+    dxi = ax>dead ? Math.sign(JOY.dx)*Math.min(1,(ax-dead)/(full-dead)) : 0;
+    dyi = ay>dead ? Math.sign(JOY.dy)*Math.min(1,(ay-dead)/(full-dead)) : 0;
   }
   if(jug.efectos.confuso>0) { dxi=-dxi; dyi=-dyi; }
   if(jug.efectos.paralizado<=0) {
-    const nx=Math.max(0,Math.min(W-jug.tam,jug.x+dxi*jug.vel));
-    const ny=Math.max(0,Math.min(H-jug.tam,jug.y+dyi*jug.vel));
-    const blocked=muros.some(m=>nx<m.x+m.w&&nx+jug.tam>m.x&&ny<m.y+m.h&&ny+jug.tam>m.y);
-    if(!blocked) { jug.x=nx; jug.y=ny; }
+    const vel=jug.vel;
+    const nx=Math.max(0,Math.min(W-jug.tam, jug.x+dxi*vel));
+    const ny=Math.max(0,Math.min(H-jug.tam, jug.y+dyi*vel));
+    const cols=(x,y)=>muros.some(m=>x<m.x+m.w&&x+jug.tam>m.x&&y<m.y+m.h&&y+jug.tam>m.y);
+    // Wall sliding: try full move, then X-only, then Y-only
+    if(!cols(nx,ny))              { jug.x=nx; jug.y=ny; }
+    else if(!cols(nx,jug.y))      { jug.x=nx; }
+    else if(!cols(jug.x,ny))      { jug.y=ny; }
   }
   // effects decay
   for(const k of ['lento','paralizado','confuso']) { jug.efectos[k]=Math.max(0,jug.efectos[k]-dt); }
@@ -2383,14 +2399,12 @@ function update(dt, tick) {
 
     if(e.tipo==='perseguidor') {
       const nx2=e.x+eVel*edx/dist, ny2=e.y+eVel*edy/dist;
-      const blocked=muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y);
-      if(!blocked){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
 
     } else if(e.tipo==='pistolero') {
       const obj=200, fac=dist>obj+20?0.6:(dist<obj-20?-0.4:0);
       const nx2=e.x+e.vel*fac*edx/dist, ny2=e.y+e.vel*fac*edy/dist;
-      const blocked=muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y);
-      if(!blocked){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
       e.disparoTimer-=dt;
       if(e.disparoTimer<=0) {
         e.disparoTimer=1500+Math.random()*1500;
@@ -2401,8 +2415,7 @@ function update(dt, tick) {
     } else if(e.tipo==='bomba') {
       if(!e.bombaExplotando) {
         const nx2=e.x+e.vel*0.8*edx/dist, ny2=e.y+e.vel*0.8*edy/dist;
-        const blocked=muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y);
-        if(!blocked){e.x=nx2;e.y=ny2;}
+        enemySlide(e,nx2,ny2);
         if(dist<90) e.bombaCarga+=dt*2; else e.bombaCarga=Math.max(0,e.bombaCarga-dt*0.5);
         if(e.bombaCarga>=450) {
           e.bombaExplotando=true; e.bombaRadio=0; e.bombaTimer=350;
@@ -2440,11 +2453,7 @@ function update(dt, tick) {
       const ddx=tx-e.x, ddy=ty-e.y, dl=Math.hypot(ddx,ddy)||1;
       const nx2=e.x+e.vel*0.7*ddx/dl;
       const ny2=e.y+e.vel*0.7*ddy/dl;
-      const blocked=muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y);
-      if(!blocked) {
-        e.x=Math.max(0,Math.min(W-e.tam,nx2));
-        e.y=Math.max(0,Math.min(H-e.tam,ny2));
-      }
+      if(true) { enemySlide(e,nx2,ny2); }
       e.escudoTimer-=dt;
       if(e.escudoTimer<=0 && dist<180) {
         if(jug.escudo) {
@@ -2461,7 +2470,7 @@ function update(dt, tick) {
       const objDist=280;
       const fac=dist>objDist+30?0.5:(dist<objDist-30?-0.4:0);
       const nx2=e.x+e.vel*fac*edx/dist, ny2=e.y+e.vel*fac*edy/dist;
-      if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
       e.sniperTimer-=dt;
       if(e.sniperTimer>0) {
         e.sniperCargando=0; e.sniperLaser=null;
@@ -2483,12 +2492,12 @@ function update(dt, tick) {
     } else if(e.tipo==='divisor') {
       // Chases player; when killed, splits into 2 smaller ones
       const nx2=e.x+e.vel*edx/dist, ny2=e.y+e.vel*edy/dist;
-      if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
 
     } else if(e.tipo==='curandero') {
       // Stays behind other enemies and periodically heals nearest ally (prevents bomb timer from decaying)
       const nx2=e.x+e.vel*0.6*edx/dist, ny2=e.y+e.vel*0.6*edy/dist;
-      if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
       e.curaTimer-=dt;
       if(e.curaTimer<=0) {
         e.curaTimer=3000+Math.random()*2000;
@@ -2501,7 +2510,7 @@ function update(dt, tick) {
     } else if(e.tipo==='iman') {
       // Periodically activates a pull that drags the player towards it
       const nx2=e.x+e.vel*edx/dist, ny2=e.y+e.vel*edy/dist;
-      if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
       e.imanTimer-=dt;
       if(e.imanTimer<=0 && !e.imanActivo) {
         e.imanActivo=true; e.imanTimer2=2000; e.imanTimer=5000+Math.random()*3000;
@@ -2520,7 +2529,7 @@ function update(dt, tick) {
 
     } else if(e.tipo==='tele') {
       const nx2=e.x+e.vel*edx/dist, ny2=e.y+e.vel*edy/dist;
-      if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
       e.teleTimer-=dt;
       if(e.teleTimer<=0) {
         e.teleTimer=4000+Math.random()*3000;
@@ -2547,12 +2556,12 @@ function update(dt, tick) {
         const tdx=nearest.x-e.x, tdy=nearest.y-e.y, td=Math.hypot(tdx,tdy)||1;
         const orbit=50, fac= td>orbit+10?0.8:(td<orbit-10?-0.5:0);
         const nx2=e.x+e.vel*fac*tdx/td, ny2=e.y+e.vel*fac*tdy/td;
-        if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+        enemySlide(e,nx2,ny2);
         e.aliado_escudado=nearest;
       } else {
         // drift toward player if no allies
         const nx2=e.x+e.vel*0.5*edx/dist, ny2=e.y+e.vel*0.5*edy/dist;
-        if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+        enemySlide(e,nx2,ny2);
         e.aliado_escudado=null;
       }
       // The ally it shields: block bullet hits on the ally
@@ -2587,12 +2596,12 @@ function update(dt, tick) {
       e.enojo=Math.max(0,e.enojo);
       const berVel=e.vel*(1+e.enojo*2.5)*eVel/e.vel;
       const nx2=e.x+berVel*edx/dist, ny2=e.y+berVel*edy/dist;
-      if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
 
     } else if(e.tipo==='vampiro') {
       // Approaches player; when close, drains their speed for a few seconds
       const nx2=e.x+e.vel*0.9*edx/dist, ny2=e.y+e.vel*0.9*edy/dist;
-      if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+      enemySlide(e,nx2,ny2);
       e.vampTimer-=dt;
       if(e.vampTimer<=0&&dist<100) {
         e.vampTimer=4000+Math.random()*2000;
@@ -2623,7 +2632,7 @@ function update(dt, tick) {
         }
       } else {
         const nx2=e.x+e.vel*edx/dist, ny2=e.y+e.vel*edy/dist;
-        if(!muros.some(m=>nx2<m.x+m.w&&nx2+e.tam>m.x&&ny2<m.y+m.h&&ny2+e.tam>m.y)){e.x=nx2;e.y=ny2;}
+        enemySlide(e,nx2,ny2);
       }
     }
     enesVivos.push(e);
