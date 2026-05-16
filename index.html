@@ -28,6 +28,7 @@
     touch-action:none;
   }
   /* Floating action buttons — retro pixel style, fixed so always visible */
+  /* Nav buttons: only visible in menus, hidden while playing */
   #float-btns {
     position:fixed;
     top:8px;
@@ -36,7 +37,9 @@
     flex-direction:column;
     gap:5px;
     z-index:100;
+    transition:opacity 0.2s;
   }
+  #float-btns.hidden { opacity:0; pointer-events:none; }
   .fbtn {
     background:rgba(8,8,24,0.88);
     border:2px solid rgba(255,255,255,0.35);
@@ -61,17 +64,17 @@
   .fbtn.red   { border-color:#ff5050; color:#ff5050; box-shadow:2px 2px 0 rgba(0,0,0,0.6),0 0 6px rgba(255,80,80,0.3); }
   .fbtn.green { border-color:#3cc850; color:#3cc850; box-shadow:2px 2px 0 rgba(0,0,0,0.6),0 0 6px rgba(60,200,80,0.3); }
   .fbtn:active { transform:translate(2px,2px); box-shadow:none; opacity:0.8; }
-  /* Fullscreen button — fixed bottom-left, large enough for touch */
+  /* Fullscreen button — fixed top-left, small, unobtrusive */
   #btn-fullscreen {
     position:fixed;
-    bottom:12px;
-    left:12px;
+    top:8px;
+    left:8px;
     background:rgba(8,8,24,0.85);
     border:2px solid rgba(255,215,0,0.5);
     border-radius:0;
     color:#ffd700;
-    font-size:22px;
-    width:52px; height:52px;
+    font-size:16px;
+    width:38px; height:38px;
     cursor:pointer;
     z-index:100;
     display:flex;
@@ -91,6 +94,40 @@
     top:50%; left:50%;
     font-size:16px;  /* prevents iOS zoom */
   }
+  /* In-game power-up panel — bottom right, only during play */
+  #power-panel {
+    position:fixed;
+    bottom:10px;
+    right:10px;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    z-index:100;
+    align-items:flex-end;
+  }
+  .pwrbtn {
+    background:rgba(8,8,24,0.85);
+    border:2px solid rgba(255,255,255,0.3);
+    border-radius:0;
+    color:#ddd;
+    font-family:'Courier New',monospace;
+    font-size:12px;
+    font-weight:bold;
+    padding:6px 10px;
+    cursor:pointer;
+    touch-action:none;
+    user-select:none;
+    text-align:right;
+    box-shadow:2px 2px 0 rgba(0,0,0,0.6);
+    letter-spacing:1px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    white-space:nowrap;
+  }
+  .pwrbtn:active { transform:translate(2px,2px); box-shadow:none; }
+  .pwrbtn.active { box-shadow:2px 2px 0 rgba(0,0,0,0.6), 0 0 8px currentColor; }
+  #power-panel.hidden { display:none; }
 </style>
 </head>
 <body>
@@ -104,6 +141,7 @@
     <button class="fbtn red"   id="btn-esc">✕ ESC</button>
   </div>
   <button id="btn-fullscreen" title="Fullscreen">[ ]</button>
+  <div id="power-panel" class="hidden"></div>
 </div>
 <script>
 // ─────────────────────────────────────────────────────────────────
@@ -1178,12 +1216,12 @@ function applyPurchase(item) {
   if(item.id==='vida')    { vidas=Math.min(vidas+1,9); }
   else if(item.id==='escudo')  { estado.jug.escudo=true; }
   else if(item.id==='veloc')   { estado.jug.velBase=Math.min(estado.jug.velBase+1,9); }
-  else if(item.id==='x2coins') { x2CoinsActivo=true; }
-  else if(item.id==='slowmo')  { slowmoActivo=5000; }
-  else if(item.id==='imune')   { imuneActivo=10000; }
-  else if(item.id==='magnet')  { magnetActivo=15000; }
-  else if(item.id==='revive')  { reviveActivo=true; }
-  else if(item.id==='supvel')  { supvelActivo=8000; estado.jug.velBase=Math.min(estado.jug.velBase+4,14); }
+  else if(item.id==='x2coins') { /* activate via power panel */ }
+  else if(item.id==='slowmo')  { /* activate via power panel */ }
+  else if(item.id==='imune')   { /* activate via power panel */ }
+  else if(item.id==='magnet')  { /* activate via power panel */ }
+  else if(item.id==='revive')  { reviveActivo=true; }  // auto on death
+  else if(item.id==='supvel')  { /* activate via power panel */ }
   else if(item.id.startsWith('skin_')) {
     skinActual=item.id.replace('skin_',''); saveShop();
     spawnFX={x:estado.jug.x+estado.jug.tam/2, y:estado.jug.y+estado.jug.tam/2, timer:800, skin:skinActual};
@@ -1934,6 +1972,105 @@ wireBtn('btn-lb',  'KeyL','l');
 wireBtn('btn-tab', 'Tab','Tab');
 wireBtn('btn-esc', 'Escape','Escape');
 
+// ─────────────────────────────────────────────────────────────────
+// FLOAT BUTTONS — hide during gameplay, show in menus
+// POWER PANEL — show during gameplay for activatable powerups
+// ─────────────────────────────────────────────────────────────────
+const floatBtns  = document.getElementById('float-btns');
+const powerPanel = document.getElementById('power-panel');
+
+// Powerups that can be activated in-game (not auto on purchase)
+const PODER_DEFS = [
+  { id:'slowmo',  icon:'⏱', label:'RALENTI',  color:'#00dcdc',
+    active:()=>slowmoActivo>0,
+    canUse:()=>getComprado('slowmo')>0 && slowmoActivo<=0,
+    activate:()=>{ slowmoActivo=5000; } },
+  { id:'imune',   icon:'⭐', label:'INMUNE',   color:'#ffd700',
+    active:()=>imuneActivo>0,
+    canUse:()=>getComprado('imune')>0 && imuneActivo<=0,
+    activate:()=>{ imuneActivo=10000; } },
+  { id:'magnet',  icon:'🧲', label:'IMAN',     color:'#e040fb',
+    active:()=>magnetActivo>0,
+    canUse:()=>getComprado('magnet')>0 && magnetActivo<=0,
+    activate:()=>{ magnetActivo=15000; } },
+  { id:'supvel',  icon:'🚀', label:'TURBO',    color:'#ff8c00',
+    active:()=>supvelActivo>0,
+    canUse:()=>getComprado('supvel')>0 && supvelActivo<=0,
+    activate:()=>{ supvelActivo=8000; if(estado&&estado.jug) estado.jug.velBase=Math.min(estado.jug.velBase+4,14); } },
+  { id:'revive',  icon:'💎', label:'REVIVE',   color:'#ff80ff',
+    active:()=>reviveActivo,
+    canUse:()=>getComprado('revive')>0,
+    activate:()=>{} }, // auto-activates on death
+  { id:'x2coins', icon:'💰', label:'x2',       color:'#ffd700',
+    active:()=>x2CoinsActivo,
+    canUse:()=>getComprado('x2coins')>0 && !x2CoinsActivo,
+    activate:()=>{ x2CoinsActivo=true; } },
+];
+
+function updateUIVisibility() {
+  const playing = isPlaying();
+  // Float nav buttons: hidden while playing
+  if(playing) floatBtns.classList.add('hidden');
+  else floatBtns.classList.remove('hidden');
+
+  // Power panel: only during gameplay
+  if(!playing) { powerPanel.classList.add('hidden'); return; }
+  powerPanel.classList.remove('hidden');
+
+  // Rebuild power buttons each frame (cheap — only a few items)
+  const available = PODER_DEFS.filter(p => getComprado(p.id) > 0);
+  if(available.length === 0) { powerPanel.innerHTML=''; return; }
+
+  // Only rebuild DOM if count changed (perf)
+  if(powerPanel.children.length !== available.length) {
+    powerPanel.innerHTML = '';
+    for(const p of available) {
+      const btn = document.createElement('button');
+      btn.className = 'pwrbtn';
+      btn.id = 'pwd-' + p.id;
+      btn.dataset.id = p.id;
+      btn.style.borderColor = p.color;
+      btn.style.color = p.color;
+      btn.addEventListener('touchend', e => {
+        e.preventDefault();
+        activatePower(p.id);
+      }, {passive:false});
+      btn.addEventListener('click', () => activatePower(p.id));
+      powerPanel.appendChild(btn);
+    }
+  }
+
+  // Update button labels and state each frame
+  for(const p of available) {
+    const btn = document.getElementById('pwd-' + p.id);
+    if(!btn) continue;
+    const isActive = p.active();
+    const canUse   = p.canUse();
+    btn.classList.toggle('active', isActive);
+    btn.style.opacity = canUse || isActive ? '1' : '0.4';
+    let label = p.icon + ' ' + p.label;
+    if(isActive) {
+      // Show timer if applicable
+      if(p.id==='slowmo')  label += ' ' + Math.ceil(slowmoActivo/1000)  + 's';
+      if(p.id==='imune')   label += ' ' + Math.ceil(imuneActivo/1000)   + 's';
+      if(p.id==='magnet')  label += ' ' + Math.ceil(magnetActivo/1000)  + 's';
+      if(p.id==='supvel')  label += ' ' + Math.ceil(supvelActivo/1000)  + 's';
+    }
+    btn.textContent = label;
+    btn.style.boxShadow = isActive
+      ? `2px 2px 0 rgba(0,0,0,0.6), 0 0 10px ${p.color}`
+      : '2px 2px 0 rgba(0,0,0,0.6)';
+  }
+}
+
+function activatePower(id) {
+  if(!isPlaying()) return;
+  const p = PODER_DEFS.find(d => d.id === id);
+  if(!p || !p.canUse()) return;
+  p.activate();
+  efectosPantalla.push({tipo:'flash',timer:300,color:[80,200,255]});
+}
+
 // ── Canvas tap handler ──
 function handleCanvasTap(clientX,clientY){
   const rect=canvas.getBoundingClientRect();
@@ -2100,6 +2237,7 @@ function loop(ts) {
   const tick=ts;
   update(dt,tick);
   draw(tick);
+  updateUIVisibility();
   requestAnimationFrame(loop);
 }
 
