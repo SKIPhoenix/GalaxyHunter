@@ -114,7 +114,6 @@ const ctx = canvas.getContext('2d');
 const W = 1200, H = 600;
 
 function resizeCanvas() {
-  // Use the actual visible area — on mobile, innerWidth/Height excludes the browser chrome
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const s  = Math.min(vw / W, vh / H);
@@ -122,8 +121,6 @@ function resizeCanvas() {
   canvas.style.height = Math.floor(H * s) + 'px';
   canvas.width  = W;
   canvas.height = H;
-  // Update joystick bottom position to stay above the fold
-  JOY.by = H - 90;
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
